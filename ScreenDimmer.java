@@ -84,7 +84,7 @@ import java.util.Properties;
 public class ScreenDimmer {
 
     // ---------------------------------------------------------------- tuning
-    static final String VERSION = "1.0.0";
+    static final String VERSION = "1.1.0";
     static final int MAX_DIM = 90;                       // never offer a fully black screen
     // fallback palette, used only if FlatLaf fails to load; FlatLaf supplies the real theme colors
     static final Color BG        = hex("#1d2127");

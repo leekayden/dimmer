@@ -8,14 +8,19 @@ brightness driver.
 
 ## Download
 
-Grab the universal jar or a platform bundle from the
-[latest release](https://github.com/leekayden/dimmer/releases/latest):
-`ScreenDimmer-1.0.jar` (universal), `ScreenDimmer-1.0-windows.zip` (jar +
-launcher), `ScreenDimmer-1.0-linux.zip` (jar + launcher).
+Grab what fits from the [latest release](https://github.com/leekayden/dimmer/releases/latest):
 
-Run `Start ScreenDimmer.bat` (or the jar directly) and look for the **blue
-crescent-moon icon in the system tray** (bottom-right corner; if you don't see
-it, click the `^` chevron to show hidden tray icons).
+- `ScreenDimmer-1.1.0-windows-standalone.zip` — **no Java needed**: unzip and
+  run `ScreenDimmer\ScreenDimmer.exe` (private JRE bundled)
+- `ScreenDimmer-1.1.0-linux-standalone.tar.gz` — **no Java needed**: extract
+  and run `sh ScreenDimmer/dimmer.sh` (bundled Linux runtime, experimental)
+- `ScreenDimmer-1.1.0.jar` — universal fat jar, needs Java 17+
+- `ScreenDimmer-1.1.0-windows.zip` / `ScreenDimmer-1.1.0-linux.zip` — jar +
+  launcher script
+
+Run it and look for the **blue crescent-moon icon in the system tray**
+(bottom-right corner; if you don't see it, click the `^` chevron to show hidden
+tray icons).
 
 ## Controls
 
