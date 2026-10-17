@@ -7,3 +7,4 @@ flatlaf_x/
 # local dev scripts (not part of the app)
 tools/
 test/
+release/

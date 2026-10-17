@@ -1,9 +1,17 @@
 # ScreenDimmer
 
-A lightweight, always-dark screen dimmer for Windows. It dims your screen with a
-pure-black translucent overlay instead of touching Windows' brightness APIs —
-so it works on desktop and external monitors, can go darker than the hardware
-minimum, and is completely independent of the system brightness driver.
+A lightweight, always-dark screen dimmer for Windows and Linux. It dims your
+screen with a pure-black translucent overlay instead of touching the system's
+brightness APIs — so it works on desktop and external monitors, can go darker
+than the hardware minimum, and is completely independent of the system
+brightness driver.
+
+## Download
+
+Grab the universal jar or a platform bundle from the
+[latest release](https://github.com/leekayden/dimmer/releases/latest):
+`ScreenDimmer-1.0.jar` (universal), `ScreenDimmer-1.0-windows.zip` (jar +
+launcher), `ScreenDimmer-1.0-linux.zip` (jar + launcher).
 
 Run `Start ScreenDimmer.bat` (or the jar directly) and look for the **blue
 crescent-moon icon in the system tray** (bottom-right corner; if you don't see
@@ -31,8 +39,9 @@ That's the whole UI — no window, no taskbar entry, no focus stealing.
 ## How it works
 
 One borderless, always-on-top black window per monitor at a configurable
-opacity (Java's uniform window translucency). JNA sets the native window style
-to click-through (`WS_EX_TRANSPARENT`), so every mouse click and keystroke
+opacity (Java's uniform window translucency). JNA makes the overlay
+click-through: on Windows via the `WS_EX_TRANSPARENT` window style, on
+Linux/X11 via an empty XShape input region — so every mouse click and keystroke
 passes straight through to whatever is underneath; the window also never takes
 focus and has no taskbar/Alt-Tab presence. A background check every 4 seconds
 keeps the overlays in sync if a monitor is added, removed or rearranged.
@@ -49,6 +58,23 @@ is roughly **60 MB** working set (JVM baseline; heap capped at 48 MB).
 
 Start with Windows: press `Win+R`, type `shell:startup`, press Enter, and put a
 shortcut to `Start ScreenDimmer.bat` in the folder that opens.
+
+### Linux (experimental)
+
+Requires Java 17+ and an X11 session (or a Wayland session with XWayland); a
+running compositor is needed for window translucency. Run with:
+
+```sh
+sh dimmer.sh
+```
+
+Click-through is implemented via the XShape extension (an empty input region)
+and is marked **experimental** — it has not been hand-tested on real Linux
+desktops yet. Safety first: if click-through or translucency cannot be
+established, the app runs in tray-only mode with dimming disabled, so the
+overlay can never trap your mouse. The tray icon needs a StatusNotifier host
+(KDE/XFCE/MATE work; on GNOME enable an AppIndicator extension, otherwise a
+fallback control window opens instead).
 
 ## Files
 

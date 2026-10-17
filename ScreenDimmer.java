@@ -5,6 +5,8 @@ import com.sun.jna.Library;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.win32.W32APIOptions;
+import com.sun.jna.ptr.IntByReference;
+import com.sun.jna.ptr.PointerByReference;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -60,7 +62,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 /**
@@ -80,6 +84,7 @@ import java.util.Properties;
 public class ScreenDimmer {
 
     // ---------------------------------------------------------------- tuning
+    static final String VERSION = "1.0.0";
     static final int MAX_DIM = 90;                       // never offer a fully black screen
     // fallback palette, used only if FlatLaf fails to load; FlatLaf supplies the real theme colors
     static final Color BG        = hex("#1d2127");
@@ -153,6 +158,10 @@ public class ScreenDimmer {
     static boolean dimActive() { return enabled && dimPercent > 0 && nativeReady; }
 
     // -------------------------------------------------------- native (JNA)
+    static final String OS = System.getProperty("os.name", "").toLowerCase();
+    static final boolean isWindows = OS.contains("win");
+    static final boolean isLinux = OS.contains("linux") || OS.contains("nix") || OS.contains("nux");
+
     interface User32 extends Library {
         User32 INSTANCE = Native.load("user32", User32.class, W32APIOptions.UNICODE_OPTIONS);
         Pointer FindWindow(String lpClassName, String lpWindowName);
@@ -160,22 +169,101 @@ public class ScreenDimmer {
         int SetWindowLong(Pointer hWnd, int nIndex, int dwNewLong);
     }
 
+    interface X11 extends Library {
+        X11 INSTANCE = Native.load("X11", X11.class);
+        Pointer XOpenDisplay(String name);
+        Pointer XDefaultRootWindow(Pointer display);
+        boolean XQueryTree(Pointer display, Pointer w, PointerByReference rootReturn,
+                PointerByReference parentReturn, PointerByReference childrenReturn, IntByReference nChildren);
+        boolean XFetchName(Pointer display, Pointer w, PointerByReference nameReturn);
+        int XFree(Pointer data);
+    }
+
+    interface XExt extends Library {
+        XExt INSTANCE = Native.load("Xext", XExt.class);
+        boolean XShapeQueryExtension(Pointer display, IntByReference eventBase, IntByReference errorBase);
+        void XShapeCombineRectangles(Pointer display, Pointer w, int shapeKind, int xOff, int yOff,
+                Pointer rects, int nRects, int op, int ordering);
+    }
+
     static final int GWL_EXSTYLE       = -20;
     static final int WS_EX_TRANSPARENT = 0x00000020;  // mouse events pass through
     static final int WS_EX_TOOLWINDOW  = 0x00000080;  // no Alt-Tab entry
     static final int WS_EX_LAYERED     = 0x00080000;  // required for alpha
 
+    static final int SHAPE_INPUT = 1;   // XShape: manipulate the input region
+    static final int SHAPE_SET   = 0;   // XShape: replace the region
+
+    static Pointer x11Display;
+    static final Map<Frame, Pointer> x11WindowCache = new HashMap<>();
+
     static void initNative() {
         try {
-            nativeReady = User32.INSTANCE != null;
+            if (isWindows) initWin32();
+            else if (isLinux) initX11();
+            else {
+                System.err.println("[ScreenDimmer] unsupported OS: " + OS);
+                nativeReady = false;
+            }
         } catch (Throwable t) {
-            System.err.println("[ScreenDimmer] JNA init failed: " + t);
+            System.err.println("[ScreenDimmer] native init failed: " + t);
             nativeReady = false;
         }
     }
 
+    static void initWin32() {
+        nativeReady = User32.INSTANCE != null;
+    }
+
+    /**
+     * Linux (X11 or XWayland): click-through is done by giving the overlay an
+     * empty input region via the XShape extension. Experimental - if the
+     * extension is missing, dimming stays off so the overlay can never block
+     * the mouse.
+     */
+    static void initX11() {
+        x11Display = X11.INSTANCE.XOpenDisplay(null);
+        if (x11Display == null) {
+            System.err.println("[ScreenDimmer] could not open X display (Wayland without XWayland?)");
+            nativeReady = false;
+            return;
+        }
+        IntByReference eventBase = new IntByReference(), errorBase = new IntByReference();
+        boolean shape = XExt.INSTANCE.XShapeQueryExtension(x11Display, eventBase, errorBase);
+        if (!shape) System.err.println("[ScreenDimmer] XShape extension unavailable - overlays would block the mouse.");
+        nativeReady = shape;
+    }
+
+    /** Depth-first search of the X window tree for our overlay by title. */
+    static Pointer findX11Window(Pointer start, String title, int depth) {
+        PointerByReference kidsRef = new PointerByReference();
+        IntByReference count = new IntByReference();
+        if (!X11.INSTANCE.XQueryTree(x11Display, start, null, null, kidsRef, count)) return null;
+        Pointer kids = kidsRef.getValue();
+        Pointer found = null;
+        for (int i = 0; i < count.getValue() && found == null; i++) {
+            Pointer win = new Pointer(kids.getLong((long) i * Native.LONG_SIZE));
+            PointerByReference nameRef = new PointerByReference();
+            if (X11.INSTANCE.XFetchName(x11Display, win, nameRef)) {
+                Pointer namePtr = nameRef.getValue();
+                if (namePtr != null) {
+                    if (title.equals(namePtr.getString(0))) found = win;
+                    X11.INSTANCE.XFree(namePtr);
+                }
+            }
+            if (found == null && depth > 1) found = findX11Window(win, title, depth - 1);
+        }
+        if (kids != null) X11.INSTANCE.XFree(kids);
+        return found;
+    }
+
     static void applyClickThrough(Frame f) {
         if (!nativeReady) return;
+        if (isWindows) win32ClickThrough(f);
+        else if (isLinux) x11ClickThrough(f);
+    }
+
+    static void win32ClickThrough(Frame f) {
         try {
             Pointer hwnd = User32.INSTANCE.FindWindow(null, f.getTitle());
             if (hwnd == null) {
@@ -185,6 +273,25 @@ public class ScreenDimmer {
             int ex = User32.INSTANCE.GetWindowLong(hwnd, GWL_EXSTYLE);
             User32.INSTANCE.SetWindowLong(hwnd, GWL_EXSTYLE,
                     ex | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW);
+        } catch (Throwable t) {
+            System.err.println("[ScreenDimmer] click-through failed: " + t);
+        }
+    }
+
+    static void x11ClickThrough(Frame f) {
+        try {
+            Pointer win = x11WindowCache.get(f);
+            if (win == null) {
+                win = findX11Window(X11.INSTANCE.XDefaultRootWindow(x11Display), f.getTitle(), 3);
+                if (win == null) {
+                    System.err.println("[ScreenDimmer] overlay window not found: " + f.getTitle());
+                    return;
+                }
+                x11WindowCache.put(f, win);
+            }
+            // zero rectangles with SHAPE_SET: an empty input region, so every
+            // click falls through to the window below
+            XExt.INSTANCE.XShapeCombineRectangles(x11Display, win, SHAPE_INPUT, 0, 0, null, 0, SHAPE_SET, 0);
         } catch (Throwable t) {
             System.err.println("[ScreenDimmer] click-through failed: " + t);
         }
@@ -205,7 +312,7 @@ public class ScreenDimmer {
         }
         if (tray != null) {
             tray.setImage(icon(dimActive()));
-            tray.setToolTip("Screen Dimmer - " + (dimActive() ? dimPercent + "%" : "off") + " (right-click: menu)");
+            tray.setToolTip("Screen Dimmer v" + VERSION + " - " + (dimActive() ? dimPercent + "%" : "off") + " (right-click: menu)");
         }
         scheduleSave();
     }
@@ -221,6 +328,7 @@ public class ScreenDimmer {
     static void rebuildOverlays() {
         for (Frame f : overlays) f.dispose();
         overlays.clear();
+        x11WindowCache.clear();
         GraphicsDevice[] devs = GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices();
         int n = 0;
         for (GraphicsDevice dev : devs) {
