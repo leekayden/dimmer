@@ -1,0 +1,9 @@
+# build intermediates
+out/
+jna_x/
+flatlaf_x/
+*.log
+
+# local dev scripts (not part of the app)
+tools/
+test/
